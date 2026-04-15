@@ -44,3 +44,4 @@ After the workflow is configured, you can trigger it manually from the repositor
 - The workflow installs `anthropic` and `requests` before running `news_agent.py`.
 - The script sends email through Gmail SMTP using `smtp.gmail.com` port `587` with STARTTLS.
 - The subject line is `Your Morning Digest — {today's date}`.
+- The workflow opts into Node.js 24 for GitHub JavaScript actions to avoid deprecation warnings on `actions/checkout@v4` and `actions/setup-python@v5`.
