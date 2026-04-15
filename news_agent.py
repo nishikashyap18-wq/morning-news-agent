@@ -5,7 +5,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from zoneinfo import ZoneInfo
 
-from anthropic import Anthropic
+from anthropic import Anthropic, APIResponse
 
 
 def get_env_var(name: str) -> str:
@@ -39,7 +39,7 @@ def query_anthropic(prompt: str, api_key: str) -> str:
         "temperature": 0.2,
     }
 
-    response = client.post("/v1/responses", body=payload)
+    response = client.post("/v1/responses", cast_to=APIResponse, body=payload)
     data = response.json()
     print("[news_agent] Received response from Anthropic")
     return extract_response_text(data)
