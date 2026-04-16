@@ -5,15 +5,13 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from zoneinfo import ZoneInfo
 
-from anthropic import Anthropic, APIResponse
-
+from anthropic import Anthropic
 
 def get_env_var(name: str) -> str:
     value = os.getenv(name)
     if not value:
         raise EnvironmentError(f"Missing required environment variable: {name}")
     return value
-
 
 def build_prompt(today_date: str) -> str:
     return (
@@ -25,54 +23,54 @@ def build_prompt(today_date: str) -> str:
         f"\n\nDate: {today_date}\n"
     )
 
-
 def query_anthropic(prompt: str, api_key: str) -> str:
     client = Anthropic(api_key=api_key)
     print("[news_agent] Querying Anthropic with model claude-sonnet-4-20250514...")
 
-    payload = {
-        "model": "claude-sonnet-4-20250514",
-        "input": prompt,
-        "tools": ["web_search_20250305"],
-        "tool": "web_search_20250305",
-        "max_output_tokens": 1200,
-        "temperature": 0.2,
-    }
-
-    response = client.post("/v1/responses", cast_to=APIResponse, body=payload)
-    data = response.json()
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1200,
+        temperature=0.2,
+        tools=[
+            {
+                "name": "web_search_20250305",
+                "description": "Search the web for current information",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query"
+                        }
+                    },
+                    "required": ["query"]
+                }
+            }
+        ],
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+    )
+    
     print("[news_agent] Received response from Anthropic")
-    return extract_response_text(data)
+    return extract_response_text(response)
 
-
-def extract_response_text(data: dict) -> str:
-    if not isinstance(data, dict):
+def extract_response_text(response) -> str:
+    if not hasattr(response, 'content'):
         raise ValueError("Unexpected Anthropic response format")
-
-    if "completion" in data and isinstance(data["completion"], str):
-        return data["completion"]
-
-    if "output" in data and isinstance(data["output"], list):
-        parts = []
-        for item in data["output"]:
-            if isinstance(item, dict):
-                content = item.get("content")
-                if isinstance(content, list):
-                    for chunk in content:
-                        if isinstance(chunk, dict) and "text" in chunk:
-                            parts.append(chunk["text"])
-                        elif isinstance(chunk, str):
-                            parts.append(chunk)
-                elif isinstance(content, str):
-                    parts.append(content)
-        if parts:
-            return "".join(parts)
-
-    if "text" in data and isinstance(data["text"], str):
-        return data["text"]
-
+    
+    parts = []
+    for block in response.content:
+        if hasattr(block, 'text'):
+            parts.append(block.text)
+    
+    if parts:
+        return "".join(parts)
+    
     raise ValueError("Unable to extract text from Anthropic response")
-
 
 def send_email(subject: str, html_body: str, sender: str, recipient: str, password: str) -> None:
     message = MIMEMultipart("alternative")
@@ -91,7 +89,6 @@ def send_email(subject: str, html_body: str, sender: str, recipient: str, passwo
         smtp.login(sender, password)
         smtp.sendmail(sender, recipient, message.as_string())
     print(f"[news_agent] Email sent to {recipient}")
-
 
 def main() -> None:
     print("[news_agent] Starting morning news digest process...")
@@ -112,7 +109,6 @@ def main() -> None:
     print("[news_agent] Preparing email content...")
     send_email(subject, html_body, gmail_address, recipient_email, gmail_app_password)
     print("[news_agent] Morning news digest complete.")
-
 
 if __name__ == "__main__":
     main()
