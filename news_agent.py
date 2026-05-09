@@ -23,54 +23,72 @@ def build_prompt(today_date: str) -> str:
         f"\n\nDate: {today_date}\n"
     )
 
-def query_anthropic(prompt: str, api_key: str) -> str:
+def query_anthropic_with_tools(prompt: str, api_key: str) -> str:
+    """Query Anthropic with tool use support."""
     client = Anthropic(api_key=api_key)
     print("[news_agent] Querying Anthropic with model claude-sonnet-4-20250514...")
-
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1200,
-        temperature=0.2,
-        tools=[
-            {
-                "name": "web_search_20250305",
-                "description": "Search the web for current information",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "The search query"
-                        }
-                    },
-                    "required": ["query"]
+    
+    messages = [{"role": "user", "content": prompt}]
+    
+    while True:
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            temperature=0.2,
+            tools=[
+                {
+                    "name": "web_search_20250305",
+                    "description": "Search the web for current information",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "The search query"
+                            }
+                        },
+                        "required": ["query"]
+                    }
                 }
-            }
-        ],
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
-    )
-    
-    print("[news_agent] Received response from Anthropic")
-    return extract_response_text(response)
-
-def extract_response_text(response) -> str:
-    if not hasattr(response, 'content'):
-        raise ValueError("Unexpected Anthropic response format")
-    
-    parts = []
-    for block in response.content:
-        if hasattr(block, 'text'):
-            parts.append(block.text)
-    
-    if parts:
-        return "".join(parts)
-    
-    raise ValueError("Unable to extract text from Anthropic response")
+            ],
+            messages=messages
+        )
+        
+        print("[news_agent] Received response from Anthropic")
+        
+        # Check if there's a text response
+        text_content = None
+        for block in response.content:
+            if hasattr(block, 'text'):
+                text_content = block.text
+                break
+        
+        if response.stop_reason == "end_turn":
+            if text_content:
+                return text_content
+            raise ValueError("No text content in final response")
+        
+        if response.stop_reason == "tool_use":
+            # Add assistant's response to messages
+            messages.append({"role": "assistant", "content": response.content})
+            
+            # Process tool calls
+            tool_results = []
+            for block in response.content:
+                if hasattr(block, 'type') and block.type == 'tool_use':
+                    print(f"[news_agent] Processing tool call: {block.name} with query: {block.input.get('query', 'unknown')}")
+                    # Execute the tool (placeholder for actual web search)
+                    tool_result = f"Search results for: {block.input.get('query', 'unknown')}"
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": tool_result
+                    })
+            
+            # Add tool results to messages
+            messages.append({"role": "user", "content": tool_results})
+        else:
+            raise ValueError(f"Unexpected stop reason: {response.stop_reason}")
 
 def send_email(subject: str, html_body: str, sender: str, recipient: str, password: str) -> None:
     message = MIMEMultipart("alternative")
@@ -104,7 +122,7 @@ def main() -> None:
     subject = f"Your Morning Digest — {subject_date}"
 
     prompt = build_prompt(subject_date)
-    html_body = query_anthropic(prompt, anthropic_api_key)
+    html_body = query_anthropic_with_tools(prompt, anthropic_api_key)
 
     print("[news_agent] Preparing email content...")
     send_email(subject, html_body, gmail_address, recipient_email, gmail_app_password)
